@@ -23,8 +23,14 @@ struct ScheduleEntry: TimelineEntry {
 
     static var sample: ScheduleEntry {
         let now = Date()
-        let items: [(String, Double)] = [("Зал", 3600), ("Созвон", 3 * 3600), ("Ужин", 5 * 3600), ("Кодинг", 6 * 3600)]
-        let occ = items.map { Occurrence(eventID: UUID(), title: $0.0, note: "", date: now.addingTimeInterval($0.1)) }
+        let items: [(String, Double, Int, String)] = [
+            ("Зал", 3600, 7, "dumbbell.fill"), ("Созвон", 3 * 3600, 0, "phone.fill"),
+            ("Ужин", 5 * 3600, 5, "fork.knife"), ("Кодинг", 6 * 3600, 2, "laptopcomputer")
+        ]
+        let occ = items.map {
+            Occurrence(event: ScheduleEvent(title: $0.0, date: now.addingTimeInterval($0.1), colorIndex: $0.2, icon: $0.3),
+                       date: now.addingTimeInterval($0.1))
+        }
         return ScheduleEntry(date: now, upcoming: occ, today: occ, hasAccess: true)
     }
 }
@@ -68,14 +74,14 @@ extension WidgetFamily {
 }
 
 extension View {
-    func widgetBackground(_ family: WidgetFamily) -> some View {
+    func widgetBackground(_ family: WidgetFamily, tint: Color = .blue) -> some View {
         containerBackground(for: .widget) {
             if family.isAccessory {
                 Color.clear
             } else {
                 ZStack {
                     Color(uiColor: .systemBackground)
-                    LinearGradient(colors: [Color.blue.opacity(0.18), .clear],
+                    LinearGradient(colors: [tint.opacity(0.30), tint.opacity(0.05)],
                                    startPoint: .topLeading, endPoint: .bottomTrailing)
                 }
             }
@@ -90,9 +96,11 @@ struct OccRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            RoundedRectangle(cornerRadius: 2)
-                .fill(past ? Color.secondary : Color.blue)
-                .frame(width: 3, height: 16)
+            Image(systemName: occ.icon)
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 18, height: 18)
+                .background(Circle().fill(past ? Color.secondary : occ.color))
             Text(showDay && !shortDay(occ.date).isEmpty ? "\(shortDay(occ.date)) \(timeString(occ.date))" : timeString(occ.date))
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
@@ -115,7 +123,7 @@ struct NoAccessView: View {
         } else {
             VStack(spacing: 6) {
                 Image(systemName: "exclamationmark.triangle").font(.title2)
-                Text("Открой «Расписание». Если не помогло — смотри README")
+                Text("Открой «Расписание» → вкладка «Ещё» → Диагностика")
                     .font(.caption).multilineTextAlignment(.center)
             }
         }
@@ -138,9 +146,14 @@ struct NextBlock: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Label("Дальше", systemImage: "calendar")
-                .font(.caption.bold())
-                .foregroundStyle(.blue)
+            HStack(spacing: 6) {
+                Image(systemName: next.icon)
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 22, height: 22)
+                    .background(Circle().fill(next.color.gradient))
+                Text("ДАЛЬШЕ").font(.caption2.bold()).foregroundStyle(next.color)
+            }
             Text(next.title)
                 .font(.headline)
                 .lineLimit(2)
@@ -169,7 +182,7 @@ struct UpcomingView: View {
     let entry: ScheduleEntry
 
     var body: some View {
-        content.widgetBackground(family)
+        content.widgetBackground(family, tint: entry.upcoming.first?.color ?? .blue)
     }
 
     @ViewBuilder
@@ -251,7 +264,7 @@ struct UpcomingView: View {
             AccessoryWidgetBackground()
             if let next = entry.upcoming.first {
                 VStack(spacing: 1) {
-                    Image(systemName: "bell.fill").font(.caption2)
+                    Image(systemName: next.icon).font(.caption2)
                     Text(timeString(next.date))
                         .font(.system(size: 14, weight: .semibold, design: .rounded))
                         .monospacedDigit()
@@ -286,7 +299,7 @@ struct UpcomingView: View {
     // Экран блокировки — строка над часами
     @ViewBuilder private var inline: some View {
         if let next = entry.upcoming.first {
-            Label("\(timeString(next.date)) \(next.title)", systemImage: "calendar")
+            Label("\(timeString(next.date)) \(next.title)", systemImage: next.icon)
         } else {
             Label("Дел нет", systemImage: "checkmark")
         }
@@ -316,13 +329,15 @@ struct DayProgressView: View {
     private var progress: Double { total == 0 ? 0 : Double(done) / Double(total) }
     private var nextToday: Occurrence? { entry.today.first { $0.date > entry.date } }
 
+    private var ringColor: Color { nextToday?.color ?? .blue }
+
     private var nextText: String {
         if let n = nextToday { return "\(timeString(n.date)) \(n.title)" }
         return total == 0 ? "Сегодня свободно" : "На сегодня всё 🎉"
     }
 
     var body: some View {
-        content.widgetBackground(family)
+        content.widgetBackground(family, tint: ringColor)
     }
 
     @ViewBuilder
@@ -353,10 +368,10 @@ struct DayProgressView: View {
             default: // маленький на главном экране
                 VStack(spacing: 10) {
                     ZStack {
-                        Circle().stroke(Color.blue.opacity(0.2), lineWidth: 10)
+                        Circle().stroke(ringColor.opacity(0.2), lineWidth: 10)
                         Circle()
                             .trim(from: 0, to: progress)
-                            .stroke(Color.blue, style: StrokeStyle(lineWidth: 10, lineCap: .round))
+                            .stroke(ringColor.gradient, style: StrokeStyle(lineWidth: 10, lineCap: .round))
                             .rotationEffect(.degrees(-90))
                         VStack(spacing: 0) {
                             Text("\(done)/\(total)")
