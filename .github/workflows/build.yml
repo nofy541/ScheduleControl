@@ -1,0 +1,42 @@
+name: Build IPA
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build (unsigned)
+        run: |
+          xcodebuild -project Raspisanie.xcodeproj -scheme Raspisanie \
+            -configuration Release -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Package IPA (+ entitlements for App Group)
+        run: |
+          mkdir Payload
+          cp -R build/Build/Products/Release-iphoneos/Raspisanie.app Payload/
+          APP=Payload/Raspisanie.app
+          # Ad-hoc подпись только чтобы вшить entitlements (App Group).
+          # Настоящую подпись потом делает Sideloadly твоим Apple ID.
+          codesign --force --sign - --entitlements Config/Widget.entitlements "$APP/PlugIns/RaspisanieWidget.appex"
+          codesign --force --sign - --entitlements Config/App.entitlements "$APP"
+          codesign -d --entitlements - "$APP/PlugIns/RaspisanieWidget.appex"
+          zip -qr Raspisanie.ipa Payload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Raspisanie-ipa
+          path: Raspisanie.ipa
