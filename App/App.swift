@@ -118,7 +118,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
 
     func sendTest() {
         let content = UNMutableNotificationContent()
-        content.title = "Расписание"
+        content.title = "Schedule Control"
         content.body = "Уведомления работают 👌"
         content.sound = .default
         let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 5, repeats: false)

@@ -103,7 +103,7 @@ struct SettingsView: View {
                 .padding(16)
                 .glass(24)
 
-                Text("Расписание \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "")")
+                Text("Schedule Control \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "")")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)

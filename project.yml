@@ -22,7 +22,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.nofy.raspisanie
         GENERATE_INFOPLIST_FILE: YES
-        INFOPLIST_KEY_CFBundleDisplayName: Расписание
+        INFOPLIST_KEY_CFBundleDisplayName: "Schedule Control"
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
   RaspisanieWidget:
@@ -32,7 +32,7 @@ targets:
     info:
       path: Config/Widget-Info.plist
       properties:
-        CFBundleDisplayName: Расписание
+        CFBundleDisplayName: "Schedule Control"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     settings:

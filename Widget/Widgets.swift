@@ -123,7 +123,7 @@ struct NoAccessView: View {
         } else {
             VStack(spacing: 6) {
                 Image(systemName: "exclamationmark.triangle").font(.title2)
-                Text("Открой «Расписание» → вкладка «Ещё» → Диагностика")
+                Text("Открой Schedule Control → вкладка «Ещё» → Диагностика")
                     .font(.caption).multilineTextAlignment(.center)
             }
         }
