@@ -1,18 +1,15 @@
 import SwiftUI
 
-// MARK: - Liquid Glass
-// На iOS 26+ (при сборке в Xcode 26) — настоящий Liquid Glass (.glassEffect).
-// На iOS 17–18 — аккуратный фолбэк на «матовое стекло» (.ultraThinMaterial).
+// MARK: - Стекло (для плавающих элементов). iOS 26 — Liquid Glass, раньше — материал.
 
 struct GlassModifier: ViewModifier {
     let radius: CGFloat
-    let tint: Color?
     let interactive: Bool
 
     func body(content: Content) -> some View {
         #if compiler(>=6.2)
         if #available(iOS 26.0, *) {
-            content.glassEffect(glass, in: .rect(cornerRadius: radius))
+            content.glassEffect(interactive ? .regular.interactive() : .regular, in: .rect(cornerRadius: radius))
         } else {
             fallback(content)
         }
@@ -21,132 +18,214 @@ struct GlassModifier: ViewModifier {
         #endif
     }
 
-    #if compiler(>=6.2)
-    @available(iOS 26.0, *)
-    private var glass: Glass {
-        var g = Glass.regular
-        if let tint { g = g.tint(tint.opacity(0.35)) }
-        if interactive { g = g.interactive() }
-        return g
-    }
-    #endif
-
     private func fallback(_ content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
         return content
-            .background((tint ?? .clear).opacity(0.18), in: shape)
-            .background(.ultraThinMaterial, in: shape)
-            .overlay(shape.strokeBorder(Color.white.opacity(0.22), lineWidth: 0.8))
-            .shadow(color: .black.opacity(0.08), radius: 12, y: 6)
+            .background(.regularMaterial, in: shape)
+            .overlay(shape.strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5))
     }
 }
 
 extension View {
-    func glass(_ radius: CGFloat = 24, tint: Color? = nil, interactive: Bool = false) -> some View {
-        modifier(GlassModifier(radius: radius, tint: tint, interactive: interactive))
+    func glass(_ radius: CGFloat = 24, interactive: Bool = false) -> some View {
+        modifier(GlassModifier(radius: radius, interactive: interactive))
     }
 
-    func screenBackground() -> some View {
-        background(AppBackground())
+    /// Плоская минималистичная карточка
+    func card(_ radius: CGFloat = 20, padding: CGFloat = 16) -> some View {
+        self
+            .padding(padding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .fill(Color(uiColor: .secondarySystemBackground))
+            )
+    }
+
+    func screen() -> some View {
+        self
+            .scrollIndicators(.hidden)
+            .background(Color(uiColor: .systemBackground).ignoresSafeArea())
     }
 }
 
-// MARK: - Фон с цветными пятнами (чтобы стеклу было что преломлять)
+// MARK: - Заголовок экрана
 
-struct AppBackground: View {
-    @Environment(\.colorScheme) private var scheme
+struct ScreenHeader: View {
+    let title: String
+    var subtitle: String? = nil
 
     var body: some View {
-        ZStack {
-            (scheme == .dark ? Color.black : Color(white: 0.95))
-            blob(.blue, size: 380, x: -150, y: -300, opacity: 0.55)
-            blob(.purple, size: 320, x: 170, y: -120, opacity: 0.45)
-            blob(.pink, size: 300, x: -120, y: 260, opacity: 0.35)
-            blob(.teal, size: 340, x: 160, y: 460, opacity: 0.35)
+        VStack(alignment: .leading, spacing: 4) {
+            if let subtitle {
+                Text(subtitle.uppercased(with: appLocale))
+                    .font(.caption.weight(.semibold))
+                    .tracking(1.2)
+                    .foregroundStyle(.secondary)
+            }
+            Text(title)
+                .font(.system(size: 34, weight: .bold))
+                .tracking(-0.5)
         }
-        .ignoresSafeArea()
-    }
-
-    private func blob(_ color: Color, size: CGFloat, x: CGFloat, y: CGFloat, opacity: Double) -> some View {
-        Circle()
-            .fill(color)
-            .frame(width: size, height: size)
-            .blur(radius: 90)
-            .offset(x: x, y: y)
-            .opacity(scheme == .dark ? opacity : opacity * 0.7)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, 12)
+        .padding(.bottom, 4)
     }
 }
 
-// MARK: - Иконка события в цветном кружке
+struct SectionTitle: View {
+    let text: String
+    var trailing: String? = nil
+    init(_ text: String, trailing: String? = nil) { self.text = text; self.trailing = trailing }
+
+    var body: some View {
+        HStack {
+            Text(text.uppercased(with: appLocale))
+            Spacer()
+            if let trailing { Text(trailing) }
+        }
+        .font(.caption.weight(.semibold))
+        .tracking(1)
+        .foregroundStyle(.secondary)
+        .padding(.top, 14)
+        .padding(.horizontal, 4)
+    }
+}
+
+// MARK: - Иконка события
 
 struct EventIcon: View {
     let icon: String
-    let color: Color
-    var size: CGFloat = 40
+    let colorIndex: Int
+    var size: CGFloat = 36
 
     var body: some View {
-        ZStack {
-            Circle().fill(color.gradient)
-            Image(systemName: icon)
-                .font(.system(size: size * 0.42, weight: .semibold))
-                .foregroundStyle(.white)
-        }
-        .frame(width: size, height: size)
+        let c = Palette.color(colorIndex)
+        Image(systemName: icon)
+            .font(.system(size: size * 0.4, weight: .semibold))
+            .foregroundStyle(c)
+            .frame(width: size, height: size)
+            .background(Circle().fill(c.opacity(Palette.colorful ? 0.16 : 0.07)))
     }
 }
 
-// MARK: - Карточка наступления события
+// MARK: - Галочка «выполнено»
 
-struct OccurrenceCard: View {
-    let occ: Occurrence
-    var past = false
-    var showDay = false
+struct CheckCircle: View {
+    let done: Bool
+    var size: CGFloat = 24
 
     var body: some View {
-        HStack(spacing: 12) {
-            EventIcon(icon: occ.icon, color: occ.color)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(occ.title)
-                    .font(.body.weight(.semibold))
-                    .strikethrough(past)
-                    .lineLimit(1)
-                if !occ.note.isEmpty {
-                    Text(occ.note).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                }
-            }
-            Spacer(minLength: 8)
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(timeString(occ.date))
-                    .font(.system(.body, design: .rounded).weight(.semibold))
-                    .monospacedDigit()
-                if showDay {
-                    Text(dayLabel(occ.date)).font(.caption2).foregroundStyle(.secondary)
-                }
+        ZStack {
+            Circle()
+                .strokeBorder(Color.primary.opacity(done ? 1 : 0.3), lineWidth: 1.5)
+            if done {
+                Circle().fill(Color.primary)
+                Image(systemName: "checkmark")
+                    .font(.system(size: size * 0.45, weight: .bold))
+                    .foregroundStyle(Color(uiColor: .systemBackground))
             }
         }
-        .padding(12)
-        .glass(20, tint: occ.color)
-        .opacity(past ? 0.55 : 1)
+        .frame(width: size, height: size)
+        .contentShape(Circle())
+        .animation(.snappy(duration: 0.2), value: done)
+    }
+}
+
+// MARK: - Строка дела
+
+struct OccurrenceRow: View {
+    let occ: Occurrence
+    var done = false
+    var showCheck = true
+    var showDay = false
+    var now = Date()
+    var onToggle: (() -> Void)? = nil
+
+    var body: some View {
+        let past = !occ.isNow(now) && occ.end < now && occ.date < now
+        HStack(spacing: 14) {
+            if showCheck {
+                CheckCircle(done: done)
+                    .onTapGesture { haptic(); onToggle?() }
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(occ.title)
+                        .font(.body.weight(.medium))
+                        .strikethrough(done)
+                        .lineLimit(1)
+                    if occ.important {
+                        Image(systemName: "star.fill").font(.caption2)
+                    }
+                    if occ.isNow(now) {
+                        Text(L("СЕЙЧАС", "NOW"))
+                            .font(.system(size: 9, weight: .bold))
+                            .tracking(0.8)
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Capsule().fill(Color.primary))
+                            .foregroundStyle(Color(uiColor: .systemBackground))
+                    }
+                }
+                HStack(spacing: 6) {
+                    Text(showDay ? "\(dayLabel(occ.date)), \(occ.timeRange)" : occ.timeRange)
+                        .monospacedDigit()
+                    if !occ.note.isEmpty {
+                        Text("·")
+                        Text(occ.note).lineLimit(1)
+                    }
+                }
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 8)
+            EventIcon(icon: occ.icon, colorIndex: occ.colorIndex, size: 32)
+        }
+        .padding(.vertical, 12)
+        .padding(.horizontal, 14)
+        .opacity(done || (past && !showCheck) ? 0.45 : 1)
         .contentShape(Rectangle())
     }
 }
 
-// MARK: - Кольцо прогресса
-
-struct ProgressRing: View {
-    let progress: Double
-    var color: Color = .blue
-    var lineWidth: CGFloat = 10
+/// Список строк в одной карточке с тонкими разделителями
+struct RowGroup<Content: View>: View {
+    @ViewBuilder let content: Content
 
     var body: some View {
-        ZStack {
-            Circle().stroke(color.opacity(0.2), lineWidth: lineWidth)
-            Circle()
-                .trim(from: 0, to: max(0.001, min(progress, 1)))
-                .stroke(color.gradient, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
-                .rotationEffect(.degrees(-90))
-                .animation(.spring(duration: 0.6), value: progress)
+        VStack(spacing: 0) {
+            content
         }
+        .background(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(Color(uiColor: .secondarySystemBackground))
+        )
+    }
+}
+
+struct Hairline: View {
+    var body: some View {
+        Rectangle().fill(Color.primary.opacity(0.08)).frame(height: 0.5).padding(.leading, 52)
+    }
+}
+
+// MARK: - Полоска прогресса
+
+struct ProgressBar: View {
+    let value: Double
+    var height: CGFloat = 4
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.primary.opacity(0.1))
+                Capsule().fill(Color.primary)
+                    .frame(width: max(height, geo.size.width * min(max(value, 0), 1)))
+                    .opacity(value > 0 ? 1 : 0)
+            }
+        }
+        .frame(height: height)
+        .animation(.snappy, value: value)
     }
 }
 
@@ -156,49 +235,65 @@ struct AddButton: View {
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
+        Button {
+            haptic()
+            action()
+        } label: {
             Image(systemName: "plus")
-                .font(.title2.weight(.bold))
+                .font(.system(size: 22, weight: .medium))
                 .foregroundStyle(.primary)
-                .frame(width: 60, height: 60)
+                .frame(width: 58, height: 58)
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .glass(30, tint: .blue, interactive: true)
-    }
-}
-
-// MARK: - Заголовок секции
-
-struct SectionTitle: View {
-    let text: String
-    init(_ text: String) { self.text = text }
-
-    var body: some View {
-        Text(text.uppercased())
-            .font(.caption.weight(.bold))
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 4)
-            .padding(.top, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        .glass(29, interactive: true)
+        .shadow(color: .black.opacity(0.12), radius: 16, y: 8)
     }
 }
 
 // MARK: - Пустое состояние
 
-struct EmptyCard: View {
+struct EmptyState: View {
     let icon: String
     let title: String
     let subtitle: String
 
     var body: some View {
         VStack(spacing: 8) {
-            Image(systemName: icon).font(.system(size: 34)).foregroundStyle(.secondary)
+            Image(systemName: icon)
+                .font(.system(size: 28, weight: .light))
+                .foregroundStyle(.secondary)
             Text(title).font(.headline)
-            Text(subtitle).font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            Text(subtitle)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
-        .padding(24)
-        .glass(24)
+        .padding(.vertical, 28)
+        .card()
+    }
+}
+
+// MARK: - Чипсы-фильтры
+
+struct Chip: View {
+    let title: String
+    let active: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: { haptic(); action() }) {
+            Text(title)
+                .font(.subheadline.weight(.medium))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .foregroundStyle(active ? Color(uiColor: .systemBackground) : Color.primary)
+                .background(
+                    Capsule().fill(active ? Color.primary : Color(uiColor: .secondarySystemBackground))
+                )
+        }
+        .buttonStyle(.plain)
+        .animation(.snappy(duration: 0.2), value: active)
     }
 }

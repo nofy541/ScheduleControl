@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 import UserNotifications
 import WidgetKit
+import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @EnvironmentObject var store: ScheduleStore
@@ -10,37 +11,70 @@ struct SettingsView: View {
     @State private var notifStatus: UNAuthorizationStatus = .notDetermined
     @State private var showDiagnostics = false
     @State private var confirmCleanup = false
+    @State private var importing = false
     @State private var toast: String?
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Ещё")
-                    .font(.system(size: 34, weight: .bold, design: .rounded))
-                    .padding(.horizontal, 4)
-                    .padding(.top, 8)
+                ScreenHeader(title: L("Ещё", "More"), subtitle: "Schedule Control")
 
-                // Виджеты
-                SectionTitle("Виджеты")
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack(spacing: 12) {
-                        EventIcon(icon: SharedStorage.isShared ? "checkmark" : "exclamationmark.triangle.fill",
-                                  color: SharedStorage.isShared ? .green : .orange, size: 36)
+                // Оформление
+                SectionTitle(L("Оформление", "Appearance"))
+                VStack(alignment: .leading, spacing: 14) {
+                    Text(L("Тема", "Theme")).font(.subheadline.weight(.medium))
+                    Picker("", selection: $store.settings.theme) {
+                        Text(L("Система", "System")).tag(0)
+                        Text(L("Светлая", "Light")).tag(1)
+                        Text(L("Тёмная", "Dark")).tag(2)
+                    }
+                    .pickerStyle(.segmented)
+
+                    Toggle(isOn: $store.settings.colorful) {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(SharedStorage.isShared ? "Виджеты подключены" : "Виджеты не видят данные")
-                                .font(.headline)
-                            Text(SharedStorage.isShared
-                                 ? "Всё, что ты добавляешь, сразу видно в виджетах"
-                                 : "Нет доступа к App Group. Нажми «Диагностика» и скинь текст разработчику")
+                            Text(L("Цветные метки", "Color labels")).font(.subheadline.weight(.medium))
+                            Text(L("По умолчанию всё чёрно-белое", "Everything is black & white by default"))
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                     }
-                    HStack(spacing: 10) {
-                        pill("Обновить", icon: "arrow.clockwise") {
-                            WidgetCenter.shared.reloadAllTimelines()
-                            flash("Виджеты обновлены")
+                    .tint(.primary)
+
+                    Divider()
+
+                    Button {
+                        if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(L("Язык: русский", "Language: English")).font(.subheadline.weight(.medium))
+                                Text(L("Берётся из системы. Поменять можно в настройках приложения",
+                                       "Follows the system. You can change it in the app settings"))
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "arrow.up.right").font(.caption).foregroundStyle(.secondary)
                         }
-                        pill(showDiagnostics ? "Скрыть" : "Диагностика", icon: "stethoscope") {
+                    }
+                    .buttonStyle(.plain)
+                }
+                .card()
+
+                // Виджеты
+                SectionTitle(L("Виджеты", "Widgets"))
+                VStack(alignment: .leading, spacing: 12) {
+                    statusLine(ok: SharedStorage.isShared,
+                               title: SharedStorage.isShared ? L("Подключены", "Connected") : L("Нет доступа к данным", "No data access"),
+                               subtitle: SharedStorage.isShared
+                                   ? L("6 виджетов, стиль меняется долгим тапом → «Изменить виджет»",
+                                       "6 widgets, change style via long press → Edit Widget")
+                                   : L("Нажми «Диагностика» и скинь текст разработчику",
+                                       "Tap Diagnostics and send the text to the developer"))
+                    HStack(spacing: 8) {
+                        pill(L("Обновить", "Refresh"), "arrow.clockwise") {
+                            WidgetCenter.shared.reloadAllTimelines()
+                            flash(L("Виджеты обновлены", "Widgets refreshed"))
+                        }
+                        pill(showDiagnostics ? L("Скрыть", "Hide") : L("Диагностика", "Diagnostics"), "stethoscope") {
                             withAnimation(.snappy) { showDiagnostics.toggle() }
                         }
                     }
@@ -50,70 +84,77 @@ struct SettingsView: View {
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(10)
-                            .glass(12)
-                        pill("Скопировать", icon: "doc.on.doc") {
+                            .background(RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.05)))
+                        pill(L("Скопировать", "Copy"), "doc.on.doc") {
                             UIPasteboard.general.string = SharedStorage.diagnostics
-                            flash("Скопировано")
+                            flash(L("Скопировано", "Copied"))
                         }
                     }
                 }
-                .padding(16)
-                .glass(24, tint: SharedStorage.isShared ? .green : .orange)
+                .card()
 
                 // Уведомления
-                SectionTitle("Уведомления")
+                SectionTitle(L("Уведомления", "Notifications"))
                 VStack(alignment: .leading, spacing: 12) {
-                    HStack(spacing: 12) {
-                        EventIcon(icon: "bell.fill", color: notifStatus == .authorized ? .blue : .red, size: 36)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(notifStatus == .authorized ? "Включены" : "Выключены").font(.headline)
-                            Text(notifStatus == .authorized
-                                 ? "Напоминания придут вовремя"
-                                 : "Разреши уведомления в настройках iPhone")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-                    HStack(spacing: 10) {
-                        pill("Тест через 5 сек", icon: "paperplane.fill") {
+                    statusLine(ok: notifStatus == .authorized,
+                               title: notifStatus == .authorized ? L("Включены", "On") : L("Выключены", "Off"),
+                               subtitle: notifStatus == .authorized
+                                   ? L("Напоминания придут вовремя", "Reminders will arrive on time")
+                                   : L("Разреши уведомления в настройках", "Allow notifications in Settings"))
+                    HStack(spacing: 8) {
+                        pill(L("Тест через 5 сек", "Test in 5 sec"), "paperplane") {
                             NotificationManager.shared.sendTest()
-                            flash("Жди уведомление 👀")
+                            flash(L("Жди уведомление", "Wait for it…"))
                         }
-                        pill("Настройки", icon: "gear") {
+                        pill(L("Настройки", "Settings"), "gear") {
                             if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
                         }
                     }
                 }
-                .padding(16)
-                .glass(24)
+                .card()
 
                 // Данные
-                SectionTitle("Данные")
+                SectionTitle(L("Данные", "Data"))
                 VStack(alignment: .leading, spacing: 12) {
                     HStack {
-                        Text("Всего дел").font(.headline)
+                        Text(L("Всего дел", "Total tasks")).font(.subheadline.weight(.medium))
                         Spacer()
-                        Text("\(store.events.count)")
-                            .font(.system(.headline, design: .rounded))
-                            .monospacedDigit()
+                        Text("\(store.events.count)").font(.subheadline.weight(.semibold)).monospacedDigit()
                     }
-                    pill("Удалить прошедшие разовые", icon: "trash", destructive: true) {
+                    HStack(spacing: 8) {
+                        ShareLink(item: store.exportURL(),
+                                  preview: SharePreview(L("Бэкап расписания", "Schedule backup"))) {
+                            Label(L("Экспорт", "Export"), systemImage: "square.and.arrow.up")
+                                .font(.subheadline.weight(.medium))
+                                .padding(.horizontal, 14).padding(.vertical, 9)
+                                .background(Capsule().fill(Color.primary.opacity(0.07)))
+                        }
+                        .buttonStyle(.plain)
+                        pill(L("Импорт", "Import"), "square.and.arrow.down") { importing = true }
+                    }
+                    if !store.state.skipped.isEmpty {
+                        pill(L("Вернуть пропущенные (\(store.state.skipped.count))",
+                               "Restore skipped (\(store.state.skipped.count))"), "arrow.uturn.backward") {
+                            store.restoreSkipped()
+                            flash(L("Вернули", "Restored"))
+                        }
+                    }
+                    pill(L("Удалить прошедшие разовые", "Delete past one-time tasks"), "trash", destructive: true) {
                         confirmCleanup = true
                     }
                 }
-                .padding(16)
-                .glass(24)
+                .card()
 
                 Text("Schedule Control \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "")")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)
-                    .padding(.top, 8)
+                    .padding(.top, 12)
             }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 120)
+            .padding(.horizontal, 20)
+            .padding(.bottom, 40)
         }
-        .scrollIndicators(.hidden)
-        .screenBackground()
+        .screen()
         .overlay(alignment: .top) {
             if let toast {
                 Text(toast)
@@ -124,25 +165,56 @@ struct SettingsView: View {
                     .padding(.top, 8)
             }
         }
-        .confirmationDialog("Удалить все прошедшие разовые дела?", isPresented: $confirmCleanup, titleVisibility: .visible) {
-            Button("Удалить", role: .destructive) {
+        .confirmationDialog(L("Удалить все прошедшие разовые дела?", "Delete all past one-time tasks?"),
+                            isPresented: $confirmCleanup, titleVisibility: .visible) {
+            Button(L("Удалить", "Delete"), role: .destructive) {
                 let n = store.deletePastOneTime()
-                flash(n == 0 ? "Нечего удалять" : "Удалено: \(n)")
+                flash(n == 0 ? L("Нечего удалять", "Nothing to delete") : L("Удалено: \(n)", "Deleted: \(n)"))
+            }
+        }
+        .fileImporter(isPresented: $importing, allowedContentTypes: [.json]) { result in
+            switch result {
+            case .success(let url):
+                do {
+                    let n = try store.importBackup(from: url)
+                    flash(L("Импортировано дел: \(n)", "Imported tasks: \(n)"))
+                } catch {
+                    flash(L("Не получилось прочитать файл", "Couldn't read the file"))
+                }
+            case .failure:
+                break
             }
         }
         .task { await refreshStatus() }
     }
 
-    private func pill(_ title: String, icon: String, destructive: Bool = false, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+    private func statusLine(ok: Bool, title: String, subtitle: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: ok ? "checkmark" : "exclamationmark")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(ok ? Color(uiColor: .systemBackground) : Color.primary)
+                .frame(width: 30, height: 30)
+                .background(Circle().fill(ok ? Color.primary : Color.primary.opacity(0.1)))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.subheadline.weight(.semibold))
+                Text(subtitle).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func pill(_ title: String, _ icon: String, destructive: Bool = false, action: @escaping () -> Void) -> some View {
+        Button {
+            haptic()
+            action()
+        } label: {
             Label(title, systemImage: icon)
-                .font(.subheadline.weight(.semibold))
+                .font(.subheadline.weight(.medium))
                 .foregroundStyle(destructive ? Color.red : Color.primary)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 9)
+                .background(Capsule().fill(Color.primary.opacity(0.07)))
         }
         .buttonStyle(.plain)
-        .glass(18, interactive: true)
     }
 
     private func flash(_ text: String) {

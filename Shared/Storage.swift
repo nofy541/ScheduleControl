@@ -1,16 +1,60 @@
 import Foundation
 
-/// Хранилище в общей папке App Group.
-///
-/// Фикс оранжевой плашки: при переподписи (Sideloadly и т.п.) имя группы
-/// может поменяться, например получить суффикс с ID команды. Поэтому мы не
-/// хардкодим имя, а читаем реальный список групп из профиля подписи
-/// (embedded.mobileprovision), который лежит внутри приложения и внутри виджета.
+// MARK: - Состояние (выполнено / пропущено) и настройки
+
+struct AppState: Codable, Equatable {
+    var done: Set<String> = []
+    var skipped: Set<String> = []
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        done = (try? c.decode(Set<String>.self, forKey: .done)) ?? []
+        skipped = (try? c.decode(Set<String>.self, forKey: .skipped)) ?? []
+    }
+
+    enum CodingKeys: String, CodingKey { case done, skipped }
+
+    /// Убираем отметки старше 120 дней, чтобы файл не рос бесконечно
+    mutating func prune(now: Date = Date()) {
+        let limit = Int(now.timeIntervalSince1970) - 120 * 86400
+        func fresh(_ key: String) -> Bool {
+            guard let ts = key.split(separator: "|").last, let t = Int(ts) else { return false }
+            return t >= limit
+        }
+        done = done.filter(fresh)
+        skipped = skipped.filter(fresh)
+    }
+}
+
+struct AppSettings: Codable, Equatable {
+    var colorful = false   // цветные метки (по умолчанию ЧБ)
+    var theme = 0          // 0 — как в системе, 1 — светлая, 2 — тёмная
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        colorful = (try? c.decode(Bool.self, forKey: .colorful)) ?? false
+        theme = (try? c.decode(Int.self, forKey: .theme)) ?? 0
+    }
+
+    enum CodingKeys: String, CodingKey { case colorful, theme }
+}
+
+struct Backup: Codable {
+    var version = 1
+    var events: [ScheduleEvent]
+    var state: AppState
+}
+
+// MARK: - Хранилище в общей папке App Group
+
 enum SharedStorage {
     static let defaultGroup = "group.com.nofy.raspisanie"
-    private static let fileName = "events.json"
 
-    // MARK: Профиль подписи
+    // MARK: Профиль подписи (реальное имя группы после переподписи)
 
     struct ProvisionInfo {
         var groups: [String] = []
@@ -39,7 +83,6 @@ enum SharedStorage {
         return info
     }()
 
-    /// Реально доступная группа (или nil, если доступа нет)
     static let resolvedGroup: String? = {
         var candidates = provision.groups.filter { $0.contains("raspisanie") }
         candidates += provision.groups
@@ -56,48 +99,72 @@ enum SharedStorage {
         resolvedGroup.flatMap { FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: $0) }
     }
 
-    static var localURL: URL {
-        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent(fileName)
+    private static var documents: URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
     }
 
-    static var fileURL: URL {
-        groupContainer?.appendingPathComponent(fileName) ?? localURL
+    static func url(_ name: String) -> URL {
+        (groupContainer ?? documents).appendingPathComponent(name)
     }
 
-    // MARK: Чтение / запись
-
-    /// Если раньше данные лежали локально (когда группа не работала) — переносим в общую папку
-    private static func migrateIfNeeded() {
-        guard let group = groupContainer?.appendingPathComponent(fileName) else { return }
+    /// Если раньше файлы лежали локально — переносим в общую папку
+    private static func migrate(_ name: String) {
+        guard let group = groupContainer?.appendingPathComponent(name) else { return }
+        let local = documents.appendingPathComponent(name)
         let fm = FileManager.default
-        if !fm.fileExists(atPath: group.path) && fm.fileExists(atPath: localURL.path) {
-            try? fm.copyItem(at: localURL, to: group)
+        if !fm.fileExists(atPath: group.path) && fm.fileExists(atPath: local.path) {
+            try? fm.copyItem(at: local, to: group)
         }
     }
 
-    static func load() -> [ScheduleEvent] {
-        migrateIfNeeded()
-        guard let data = try? Data(contentsOf: fileURL),
-              let list = try? JSONDecoder().decode([ScheduleEvent].self, from: data) else { return [] }
-        return list
+    private static func read<T: Decodable>(_ type: T.Type, _ name: String) -> T? {
+        migrate(name)
+        guard let data = try? Data(contentsOf: url(name)) else { return nil }
+        return try? JSONDecoder().decode(type, from: data)
     }
 
-    static func save(_ events: [ScheduleEvent]) {
-        if let data = try? JSONEncoder().encode(events) {
-            try? data.write(to: fileURL, options: .atomic)
+    private static func write<T: Encodable>(_ value: T, _ name: String) {
+        if let data = try? JSONEncoder().encode(value) {
+            try? data.write(to: url(name), options: .atomic)
         }
     }
 
-    // MARK: Диагностика (экран «Ещё»)
+    // MARK: События
+
+    static func load() -> [ScheduleEvent] { read([ScheduleEvent].self, "events.json") ?? [] }
+    static func save(_ events: [ScheduleEvent]) { write(events, "events.json") }
+
+    // MARK: Отметки
+
+    static func loadState() -> AppState { read(AppState.self, "state.json") ?? AppState() }
+    static func saveState(_ state: AppState) {
+        var s = state
+        s.prune()
+        write(s, "state.json")
+    }
+
+    /// Используется и приложением, и интерактивным виджетом
+    static func toggleDone(_ key: String) {
+        var s = loadState()
+        if s.done.contains(key) { s.done.remove(key) } else { s.done.insert(key) }
+        saveState(s)
+    }
+
+    // MARK: Настройки
+
+    static func loadSettings() -> AppSettings { read(AppSettings.self, "settings.json") ?? AppSettings() }
+    static func saveSettings(_ settings: AppSettings) { write(settings, "settings.json") }
+
+    // MARK: Диагностика
 
     static var diagnostics: String {
         """
         Bundle ID: \(Bundle.main.bundleIdentifier ?? "—")
         App ID: \(provision.appID ?? "—")
-        Профиль найден: \(provision.found ? "да" : "нет")
-        Профиль: \(provision.profileName ?? "—")
-        Группы в профиле: \(provision.groups.isEmpty ? "нет" : provision.groups.joined(separator: ", "))
-        Используется: \(resolvedGroup ?? "нет доступа")
+        Profile: \(provision.found ? (provision.profileName ?? "—") : "not found")
+        Groups: \(provision.groups.isEmpty ? "none" : provision.groups.joined(separator: ", "))
+        Using: \(resolvedGroup ?? "no access")
+        Language: \(isRU ? "ru" : "en")
         """
     }
 }

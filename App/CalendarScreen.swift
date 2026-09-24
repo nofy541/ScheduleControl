@@ -8,12 +8,7 @@ struct CalendarScreen: View {
     @State private var month: Date = CalendarScreen.monthStart(Date())
     @State private var selected: Date = Calendar.current.startOfDay(for: Date())
 
-    /// Календарь с неделей от понедельника
-    private var cal: Calendar {
-        var c = Calendar.current
-        c.firstWeekday = 2
-        return c
-    }
+    private let cal = Calendar.current
 
     static func monthStart(_ d: Date) -> Date {
         let c = Calendar.current
@@ -25,110 +20,96 @@ struct CalendarScreen: View {
         let occs = store.occurrences(from: month, to: monthEnd)
         let byDay = Dictionary(grouping: occs) { cal.startOfDay(for: $0.date) }
         let dayList = store.day(selected)
+        let doneCount = dayList.filter { store.isDone($0) }.count
 
         return ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Календарь")
-                    .font(.system(size: 34, weight: .bold, design: .rounded))
-                    .padding(.horizontal, 4)
-                    .padding(.top, 8)
+                ScreenHeader(title: cap(fmt(month, "LLLL")), subtitle: fmt(month, "yyyy"))
 
-                monthCard(byDay: byDay)
+                monthGrid(byDay: byDay)
 
-                HStack {
-                    SectionTitle(dayTitle(selected))
-                    if !dayList.isEmpty {
-                        Text("\(dayList.count)")
-                            .font(.caption.weight(.bold))
-                            .padding(.horizontal, 8).padding(.vertical, 2)
-                            .glass(10)
-                            .padding(.top, 8)
-                    }
-                }
+                SectionTitle(dayTitle(selected), trailing: dayList.isEmpty ? nil : "\(doneCount)/\(dayList.count)")
 
                 if dayList.isEmpty {
                     Button { onAdd(selected) } label: {
-                        VStack(spacing: 8) {
-                            Image(systemName: "plus.circle.fill").font(.system(size: 30)).foregroundStyle(.blue)
-                            Text("Свободный день").font(.headline).foregroundStyle(.primary)
-                            Text("Нажми, чтобы добавить дело на этот день")
-                                .font(.subheadline).foregroundStyle(.secondary)
+                        HStack {
+                            Image(systemName: "plus")
+                            Text(L("Добавить дело на этот день", "Add a task for this day"))
                         }
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity)
-                        .padding(22)
+                        .padding(.vertical, 22)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                .strokeBorder(Color.primary.opacity(0.15), style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
+                        )
                     }
                     .buttonStyle(.plain)
-                    .glass(24)
                 } else {
-                    ForEach(dayList) { occ in
-                        OccurrenceCard(occ: occ, past: occ.date < Date())
+                    RowGroup {
+                        ForEach(Array(dayList.enumerated()), id: \.element.id) { i, occ in
+                            if i > 0 { Hairline() }
+                            OccurrenceRow(occ: occ, done: store.isDone(occ), showCheck: true) {
+                                withAnimation(.snappy) { store.toggleDone(occ) }
+                            }
                             .onTapGesture { onEdit(occ.eventID) }
+                            .contextMenu {
+                                if occ.repeating {
+                                    Button { withAnimation { store.skip(occ) } } label: {
+                                        Label(L("Пропустить этот раз", "Skip this time"), systemImage: "forward")
+                                    }
+                                }
+                                Button { onEdit(occ.eventID) } label: { Label(L("Изменить", "Edit"), systemImage: "pencil") }
+                            }
+                        }
                     }
                 }
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 20)
             .padding(.bottom, 120)
         }
-        .scrollIndicators(.hidden)
-        .screenBackground()
+        .screen()
     }
 
-    // MARK: - Карточка месяца
+    // MARK: - Сетка месяца
 
-    private func monthCard(byDay: [Date: [Occurrence]]) -> some View {
+    private func monthGrid(byDay: [Date: [Occurrence]]) -> some View {
         let columns = Array(repeating: GridItem(.flexible(), spacing: 0), count: 7)
-        let symbols = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
 
-        return VStack(spacing: 10) {
-            // Шапка: месяц и стрелки
+        return VStack(spacing: 8) {
             HStack {
-                Button { shiftMonth(-1) } label: {
-                    Image(systemName: "chevron.left").font(.headline).frame(width: 36, height: 36)
-                }
-                .buttonStyle(.plain)
-                .glass(18, interactive: true)
-
+                navButton("chevron.left") { shiftMonth(-1) }
                 Spacer()
-                VStack(spacing: 0) {
-                    Text(ruFormat(month, "LLLL").capitalized)
-                        .font(.system(.title3, design: .rounded).weight(.bold))
-                    Text(ruFormat(month, "yyyy")).font(.caption).foregroundStyle(.secondary)
+                if !cal.isDate(month, equalTo: Date(), toGranularity: .month) {
+                    Button(L("Сегодня", "Today")) { goToday() }
+                        .font(.subheadline.weight(.semibold))
+                        .buttonStyle(.plain)
                 }
-                .onTapGesture { goToday() }
                 Spacer()
-
-                Button { shiftMonth(1) } label: {
-                    Image(systemName: "chevron.right").font(.headline).frame(width: 36, height: 36)
-                }
-                .buttonStyle(.plain)
-                .glass(18, interactive: true)
+                navButton("chevron.right") { shiftMonth(1) }
             }
 
-            // Дни недели
             LazyVGrid(columns: columns, spacing: 0) {
-                ForEach(symbols, id: \.self) { s in
-                    Text(s).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                ForEach(Array(orderedWeekdaySymbols().enumerated()), id: \.offset) { _, s in
+                    Text(s)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(height: 20)
                 }
             }
 
-            // Сетка дней
-            LazyVGrid(columns: columns, spacing: 6) {
+            LazyVGrid(columns: columns, spacing: 4) {
                 ForEach(Array(gridDays().enumerated()), id: \.offset) { _, day in
                     if let day {
                         dayCell(day, occs: byDay[day] ?? [])
                     } else {
-                        Color.clear.frame(height: 46)
+                        Color.clear.frame(height: 48)
                     }
                 }
             }
-
-            if !cal.isDate(month, equalTo: Date(), toGranularity: .month) {
-                Button("К сегодняшнему дню") { goToday() }
-                    .font(.footnote.weight(.semibold))
-            }
         }
-        .padding(14)
-        .glass(28)
+        .card(24, padding: 14)
         .gesture(
             DragGesture(minimumDistance: 30).onEnded { v in
                 if v.translation.width < -50 { shiftMonth(1) }
@@ -137,44 +118,66 @@ struct CalendarScreen: View {
         )
     }
 
+    private func navButton(_ icon: String, _ action: @escaping () -> Void) -> some View {
+        Button(action: { haptic(); action() }) {
+            Image(systemName: icon)
+                .font(.system(size: 15, weight: .semibold))
+                .frame(width: 34, height: 34)
+                .background(Circle().fill(Color.primary.opacity(0.06)))
+        }
+        .buttonStyle(.plain)
+    }
+
     private func dayCell(_ day: Date, occs: [Occurrence]) -> some View {
         let isToday = cal.isDateInToday(day)
         let isSelected = cal.isDate(day, inSameDayAs: selected)
-        let colors = Array(Set(occs.map(\.colorIndex))).sorted().prefix(3)
+        let allDone = !occs.isEmpty && occs.allSatisfy { store.isDone($0) }
+        let dots = min(occs.count, 3)
+        let colorful = Palette.colorful
+        let dotColors = Array(Set(occs.map(\.colorIndex))).sorted().prefix(3)
 
-        return VStack(spacing: 3) {
+        return VStack(spacing: 4) {
             Text("\(cal.component(.day, from: day))")
-                .font(.system(.callout, design: .rounded).weight(isToday || isSelected ? .bold : .regular))
-                .foregroundStyle(isSelected ? Color.white : (isToday ? Color.blue : Color.primary))
+                .font(.system(size: 16, weight: isToday || isSelected ? .semibold : .regular))
+                .monospacedDigit()
+                .foregroundStyle(isSelected ? Color(uiColor: .systemBackground) : Color.primary)
                 .frame(width: 34, height: 34)
                 .background {
                     if isSelected {
-                        Circle().fill(Color.blue.gradient)
+                        Circle().fill(Color.primary)
                     } else if isToday {
-                        Circle().strokeBorder(Color.blue, lineWidth: 1.5)
+                        Circle().strokeBorder(Color.primary, lineWidth: 1.2)
                     }
                 }
             HStack(spacing: 3) {
-                ForEach(Array(colors), id: \.self) { i in
-                    Circle().fill(Palette.color(i)).frame(width: 5, height: 5)
+                if allDone {
+                    Image(systemName: "checkmark").font(.system(size: 7, weight: .black))
+                } else if colorful {
+                    ForEach(Array(dotColors), id: \.self) { i in
+                        Circle().fill(Palette.raw(i)).frame(width: 4, height: 4)
+                    }
+                } else {
+                    ForEach(0..<dots, id: \.self) { _ in
+                        Circle().fill(Color.primary).frame(width: 4, height: 4)
+                    }
                 }
             }
-            .frame(height: 5)
+            .frame(height: 6)
         }
-        .frame(height: 46)
+        .frame(height: 48)
         .frame(maxWidth: .infinity)
         .contentShape(Rectangle())
         .onTapGesture {
+            haptic()
             withAnimation(.snappy) { selected = day }
         }
     }
 
     // MARK: - Логика
 
-    /// Дни месяца + пустые ячейки перед первым числом
     private func gridDays() -> [Date?] {
         guard let range = cal.range(of: .day, in: .month, for: month) else { return [] }
-        let weekday = cal.component(.weekday, from: month)       // 1 = вс
+        let weekday = cal.component(.weekday, from: month)
         let leading = (weekday - cal.firstWeekday + 7) % 7
         var days: [Date?] = Array(repeating: nil, count: leading)
         for d in range {
@@ -186,7 +189,6 @@ struct CalendarScreen: View {
     private func shiftMonth(_ delta: Int) {
         withAnimation(.snappy) {
             month = cal.date(byAdding: .month, value: delta, to: month) ?? month
-            // Выбираем 1-е число (или сегодня, если вернулись в текущий месяц)
             selected = cal.isDate(month, equalTo: Date(), toGranularity: .month) ? cal.startOfDay(for: Date()) : month
         }
     }
@@ -199,8 +201,8 @@ struct CalendarScreen: View {
     }
 
     private func dayTitle(_ d: Date) -> String {
-        if cal.isDateInToday(d) { return "Сегодня" }
-        if cal.isDateInTomorrow(d) { return "Завтра" }
-        return ruFormat(d, "EEEE, d MMMM")
+        if cal.isDateInToday(d) { return L("Сегодня", "Today") }
+        if cal.isDateInTomorrow(d) { return L("Завтра", "Tomorrow") }
+        return fmt(d, "EEEEdMMMM")
     }
 }
